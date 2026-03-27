@@ -74,7 +74,8 @@ jobs:
             docker compose up -d mongodb qdrant
 
             if ! command -v uv >/dev/null 2>&1; then
-              python3 -m pip install --user uv
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
             fi
 
             uv sync
