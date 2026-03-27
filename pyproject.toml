@@ -1,0 +1,44 @@
+[project]
+name = "lostitem"
+version = "1.0.0"
+description = "경찰청 습득물 AI 검색 시스템 - 텍스트/이미지 기반 분실물 찾기"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pydantic-ai>=0.0.14",
+    "openai>=1.0",
+    "httpx>=0.27",
+    "qdrant-client>=1.9",
+    "sentence-transformers>=3.0",
+    "pillow>=10.0",
+    "numpy>=1.26",
+    "python-multipart>=0.0.9",
+    "motor>=3.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

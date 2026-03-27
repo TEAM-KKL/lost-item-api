@@ -1,0 +1,52 @@
+# 환경변수 (절대 커밋 금지)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# uv
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Qdrant 로컬 스토리지 (Docker volume 사용 시 불필요)
+qdrant_storage/
+
+# HuggingFace 캐시 (로컬 개발 시 자동 생성)
+.cache/
+
+# 테스트 캐시
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 빌드
+*.egg
+
+# 로그
+*.log
+uvicorn_new.log
+
+# 다운로드 이미지
+downloads/
