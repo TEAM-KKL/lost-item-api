@@ -46,24 +46,12 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          source: "."
+          source: "app,pyproject.toml,uv.lock,docker-compose.yml"
           target: ${{ secrets.DEPLOY_PATH }}
           strip_components: 0
           overwrite: true
           rm: false
           tar_dereference: true
-          exclude: >
-            .git,
-            .github,
-            .venv,
-            .pytest_cache,
-            .claude,
-            .idea,
-            __pycache__,
-            downloads,
-            *.log,
-            test_result.txt,
-            .env
 
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
