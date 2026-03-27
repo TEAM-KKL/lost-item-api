@@ -67,16 +67,23 @@ jobs:
 
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
+          envs: ENV_FILE
           script_stop: true
           script: |
             set -e
             export PATH="$HOME/.local/bin:$PATH"
             cd "${{ secrets.DEPLOY_PATH }}"
+
+            cat > .env <<'EOF'
+            $ENV_FILE
+            EOF
 
             docker compose up -d mongodb qdrant
 
