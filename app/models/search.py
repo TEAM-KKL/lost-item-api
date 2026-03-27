@@ -67,3 +67,20 @@ class SearchResponse(BaseModel):
     agent_reasoning: str | None = Field(default=None, description="AI 에이전트 검색 전략 요약")
     query_metadata: SearchMetadata | None = Field(default=None, description="AI가 추출한 쿼리 메타데이터")
     search_time_ms: float = Field(description="검색 소요 시간 (밀리초)")
+
+
+class SessionMessageResponse(BaseModel):
+    """Single stored session message."""
+
+    role: str = Field(description="메시지 작성자 역할")
+    content: str = Field(description="메시지 본문")
+    created_at: str | None = Field(default=None, description="메시지 생성 시각 (ISO 8601)")
+
+
+class SessionHistoryResponse(BaseModel):
+    """Session conversation history response."""
+
+    session_id: str = Field(description="검색 대화 세션 ID")
+    summary: str = Field(default="", description="압축된 세션 요약")
+    last_filters: dict[str, str | None] = Field(default_factory=dict, description="최근 저장된 검색 필터")
+    messages: list[SessionMessageResponse] = Field(default_factory=list, description="세션 대화 기록")

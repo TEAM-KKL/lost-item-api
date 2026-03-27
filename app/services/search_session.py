@@ -108,6 +108,32 @@ class SearchSessionService:
             last_filters=self._filters_from_doc(session_doc.get("last_filters")),
         )
 
+    async def get_session_history(self, session_id: str) -> SessionContext | None:
+        session_doc = await self._sessions.find_one({"session_id": session_id})
+        if session_doc is None:
+            return None
+
+        message_docs = await (
+            self._messages
+            .find({"session_id": session_id})
+            .sort("created_at", 1)
+            .to_list(length=1000)
+        )
+        messages = [
+            SessionMessage(
+                role=doc.get("role", "user"),
+                content=doc.get("content", ""),
+                created_at=doc.get("created_at"),
+            )
+            for doc in message_docs
+        ]
+        return SessionContext(
+            session_id=session_id,
+            summary=session_doc.get("summary", ""),
+            recent_messages=messages,
+            last_filters=self._filters_from_doc(session_doc.get("last_filters")),
+        )
+
     async def append_session_messages(self, session_id: str, messages: list[SessionMessage]) -> None:
         now = datetime.now(timezone.utc)
         docs = [

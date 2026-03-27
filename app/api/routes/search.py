@@ -13,7 +13,12 @@ from app.api.deps import (
     get_search_session_service,
     get_vector_store,
 )
-from app.models.search import SearchResponse, TextSearchRequest
+from app.models.search import (
+    SearchResponse,
+    SessionHistoryResponse,
+    SessionMessageResponse,
+    TextSearchRequest,
+)
 from app.services.embedding import EmbeddingService
 from app.services.search_session import (
     SearchSessionService,
@@ -44,6 +49,14 @@ def _merge_filters(request_filters: SessionFilters, stored_filters: SessionFilte
         filter_date_from=request_filters.filter_date_from or stored_filters.filter_date_from,
         filter_date_to=request_filters.filter_date_to or stored_filters.filter_date_to,
     )
+
+
+def _filters_to_dict(filters: SessionFilters) -> dict[str, str | None]:
+    return {
+        "filter_category": filters.filter_category,
+        "filter_date_from": filters.filter_date_from,
+        "filter_date_to": filters.filter_date_to,
+    }
 
 
 def _build_result_summary(
@@ -99,6 +112,40 @@ async def _persist_session_turn(
         await session_service.update_session_summary(session_id, existing_summary, filters)
     except Exception as exc:
         logger.warning("세션 저장 실패, 검색 결과만 반환: %s", exc)
+
+
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionHistoryResponse,
+    summary="세션 대화 기록 조회",
+)
+async def get_session_history(
+    session_id: str,
+    session_service: SearchSessionService = Depends(get_search_session_service),
+) -> SessionHistoryResponse:
+    try:
+        session_context = await session_service.get_session_history(session_id)
+    except Exception as exc:
+        logger.warning("세션 기록 조회 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="세션 기록 조회에 실패했습니다.") from exc
+
+    if session_context is None:
+        raise HTTPException(status_code=404, detail="해당 session_id의 세션을 찾을 수 없습니다.")
+
+    messages = [
+        SessionMessageResponse(
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at.isoformat() if message.created_at else None,
+        )
+        for message in session_context.recent_messages
+    ]
+    return SessionHistoryResponse(
+        session_id=session_context.session_id,
+        summary=session_context.summary,
+        last_filters=_filters_to_dict(session_context.last_filters),
+        messages=messages,
+    )
 
 
 @router.post("/text", response_model=SearchResponse, summary="텍스트로 분실물 검색")
@@ -232,7 +279,7 @@ async def search_combined(
     vector_store: VectorStoreService = Depends(get_vector_store),
     session_service: SearchSessionService = Depends(get_search_session_service),
 ) -> SearchResponse:
-    del text_weight  # 현재는 RRF 기반 병합만 지원
+    del text_weight
     start = time.perf_counter()
 
     if not query and not file:

@@ -1,5 +1,8 @@
+from datetime import datetime, timezone
+
 from app.agent.agent import SearchDeps, build_agent_input
-from app.api.routes.search import _merge_filters
+from app.api.routes.search import _filters_to_dict, _merge_filters
+from app.models.search import SessionHistoryResponse, SessionMessageResponse
 from app.services.search_session import (
     SessionContext,
     SessionFilters,
@@ -70,3 +73,37 @@ def test_summarize_messages_keeps_compact_history() -> None:
     assert "Earlier summary" in summary
     assert "user:" in summary
     assert "assistant:" in summary
+
+
+def test_filters_to_dict_keeps_expected_shape() -> None:
+    filters = _filters_to_dict(
+        SessionFilters(
+            filter_category="wallet",
+            filter_date_from="2026-03-20",
+            filter_date_to=None,
+        )
+    )
+
+    assert filters == {
+        "filter_category": "wallet",
+        "filter_date_from": "2026-03-20",
+        "filter_date_to": None,
+    }
+
+
+def test_session_history_response_serializes_messages() -> None:
+    message = SessionMessageResponse(
+        role="user",
+        content="Find my wallet",
+        created_at=datetime(2026, 3, 27, 10, 0, tzinfo=timezone.utc).isoformat(),
+    )
+    response = SessionHistoryResponse(
+        session_id="session-1",
+        summary="Earlier summary",
+        last_filters={"filter_category": "wallet"},
+        messages=[message],
+    )
+
+    assert response.session_id == "session-1"
+    assert response.messages[0].role == "user"
+    assert response.last_filters["filter_category"] == "wallet"
