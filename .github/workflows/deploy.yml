@@ -67,6 +67,7 @@ jobs:
           script: |
             set -e
             export PATH="$HOME/.local/bin:$PATH"
+            export UV_TORCH_BACKEND=cpu
             cd "${{ secrets.DEPLOY_PATH }}"
 
             printf '%s\n' "$ENV_FILE" > .env
@@ -78,7 +79,7 @@ jobs:
               export PATH="$HOME/.local/bin:$PATH"
             fi
 
-            uv sync
+            uv sync --no-dev
 
             pkill -f "uvicorn app.main:app" || true
             nohup .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 < /dev/null &
