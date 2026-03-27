@@ -1,0 +1,90 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        run: uv run pytest -q tests/test_search_session.py
+
+      - name: Create target directory
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script_stop: true
+          script: |
+            mkdir -p "${{ secrets.DEPLOY_PATH }}"
+
+      - name: Copy project files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: "."
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
+          overwrite: true
+          rm: false
+          tar_dereference: true
+          exclude: >
+            .git,
+            .github,
+            .venv,
+            .pytest_cache,
+            .claude,
+            .idea,
+            __pycache__,
+            downloads,
+            *.log,
+            test_result.txt,
+            .env
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+            cd "${{ secrets.DEPLOY_PATH }}"
+
+            docker compose up -d mongodb qdrant
+
+            if ! command -v uv >/dev/null 2>&1; then
+              python3 -m pip install --user uv
+            fi
+
+            uv sync
+
+            pkill -f "uvicorn app.main:app" || true
+            nohup .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 < /dev/null &
