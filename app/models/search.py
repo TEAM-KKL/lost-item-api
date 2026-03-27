@@ -12,7 +12,7 @@ class TextSearchRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50, description="반환할 결과 수")
     use_agent: bool = Field(
         default=True,
-        description="True: PydanticAI 에이전트 경유 (쿼리 분석 + 추론), False: 원시 벡터 검색",
+        description="True: GPT-4o 에이전트가 vector_search 툴로 반복 검색, False: 원시 벡터 검색",
     )
     filter_category: str | None = Field(default=None, description="물품분류명 필터 (예: 지갑 > 기타 지갑)")
     filter_date_from: str | None = Field(default=None, description="습득일 시작 (YYYY-MM-DD)")

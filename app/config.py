@@ -10,7 +10,10 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # OpenAI
+    # Anthropic
+    anthropic_api_key: str = ""
+
+    # OpenAI (legacy — 미사용)
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
 
