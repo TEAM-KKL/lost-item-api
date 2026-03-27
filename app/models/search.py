@@ -64,6 +64,7 @@ class SearchResponse(BaseModel):
     items: list[LostItemResult] = Field(description="검색 결과 목록")
     total: int = Field(description="반환된 결과 수")
     session_id: str | None = Field(default=None, description="검색 대화 세션 ID")
+    assistant_message: str | None = Field(default=None, description="사용자에게 보여줄 에이전트 응답")
     agent_reasoning: str | None = Field(default=None, description="AI 에이전트 검색 전략 요약")
     query_metadata: SearchMetadata | None = Field(default=None, description="AI가 추출한 쿼리 메타데이터")
     search_time_ms: float = Field(description="검색 소요 시간 (밀리초)")

@@ -14,6 +14,7 @@ from app.api.deps import (
     get_vector_store,
 )
 from app.models.search import (
+    LostItemResult,
     SearchResponse,
     SessionHistoryResponse,
     SessionMessageResponse,
@@ -59,21 +60,25 @@ def _filters_to_dict(filters: SessionFilters) -> dict[str, str | None]:
     }
 
 
-def _build_result_summary(
+def _build_assistant_message(
     *,
     query: str,
-    total: int,
-    filters: SessionFilters,
+    results: list[LostItemResult],
     agent_reasoning: str | None = None,
 ) -> str:
-    parts = [f"'{query}' 검색 결과 {total}건"]
-    if filters.filter_category:
-        parts.append(f"카테고리={filters.filter_category}")
-    if filters.filter_date_from or filters.filter_date_to:
-        parts.append(f"기간={filters.filter_date_from or '-'}~{filters.filter_date_to or '-'}")
-    if agent_reasoning:
-        parts.append(f"요약={agent_reasoning}")
-    return " | ".join(parts)
+    if agent_reasoning and agent_reasoning.strip():
+        return agent_reasoning.strip()
+
+    if not results:
+        return f"'{query}'에 대한 검색 결과를 찾지 못했습니다. 다른 표현이나 장소, 날짜를 더 알려주시면 다시 찾아볼게요."
+
+    headline = f"'{query}'와 관련된 결과 {len(results)}건을 찾았습니다."
+    top_lines = []
+    for index, item in enumerate(results[:3], start=1):
+        top_lines.append(
+            f"{index}. {item.fd_prdt_nm} / {item.dep_place} / {item.fd_ymd} / 유사도 {item.score:.3f}"
+        )
+    return headline + "\n" + "\n".join(top_lines)
 
 
 async def _load_session_context(
@@ -94,7 +99,7 @@ async def _persist_session_turn(
     session_id: str | None,
     *,
     user_query: str,
-    assistant_summary: str,
+    assistant_message: str,
     filters: SessionFilters,
     existing_summary: str = "",
 ) -> None:
@@ -106,7 +111,7 @@ async def _persist_session_turn(
             session_id,
             [
                 SessionMessage(role="user", content=user_query),
-                SessionMessage(role="assistant", content=assistant_summary),
+                SessionMessage(role="assistant", content=assistant_message),
             ],
         )
         await session_service.update_session_summary(session_id, existing_summary, filters)
@@ -210,17 +215,16 @@ async def search_by_text(
             filter_date_to=effective_filters.filter_date_to,
         )
 
-    assistant_summary = _build_result_summary(
+    assistant_message = _build_assistant_message(
         query=request.query,
-        total=len(results),
-        filters=effective_filters,
+        results=results,
         agent_reasoning=agent_reasoning,
     )
     await _persist_session_turn(
         session_service,
         session_id,
         user_query=request.query,
-        assistant_summary=assistant_summary,
+        assistant_message=assistant_message,
         filters=effective_filters,
         existing_summary=session_context.summary if session_context else "",
     )
@@ -230,6 +234,7 @@ async def search_by_text(
         items=results,
         total=len(results),
         session_id=session_id,
+        assistant_message=assistant_message,
         agent_reasoning=agent_reasoning,
         query_metadata=query_metadata,
         search_time_ms=round(elapsed_ms, 2),
@@ -258,11 +263,16 @@ async def search_by_image(
         raise HTTPException(status_code=422, detail=f"이미지 처리 실패: {exc}") from exc
 
     results = await vector_store.search_by_image(image_vec=image_vec, top_k=top_k)
+    assistant_message = _build_assistant_message(
+        query="이미지 검색",
+        results=results,
+    )
     elapsed_ms = (time.perf_counter() - start) * 1000
     return SearchResponse(
         items=results,
         total=len(results),
         session_id=None,
+        assistant_message=assistant_message,
         search_time_ms=round(elapsed_ms, 2),
     )
 
@@ -337,17 +347,17 @@ async def search_combined(
         else:
             results = await vector_store.search_by_text(text_vec, top_k=top_k)
 
+    assistant_message = _build_assistant_message(
+        query=query or "복합 검색",
+        results=results,
+        agent_reasoning=agent_reasoning,
+    )
     if query:
         await _persist_session_turn(
             session_service,
             resolved_session_id,
             user_query=query,
-            assistant_summary=_build_result_summary(
-                query=query,
-                total=len(results),
-                filters=session_context.last_filters if session_context else SessionFilters(),
-                agent_reasoning=agent_reasoning,
-            ),
+            assistant_message=assistant_message,
             filters=session_context.last_filters if session_context else SessionFilters(),
             existing_summary=session_context.summary if session_context else "",
         )
@@ -357,6 +367,7 @@ async def search_combined(
         items=results,
         total=len(results),
         session_id=resolved_session_id,
+        assistant_message=assistant_message,
         agent_reasoning=agent_reasoning,
         query_metadata=query_metadata,
         search_time_ms=round(elapsed_ms, 2),

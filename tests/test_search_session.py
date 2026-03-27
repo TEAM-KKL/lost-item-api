@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
 from app.agent.agent import SearchDeps, build_agent_input
-from app.api.routes.search import _filters_to_dict, _merge_filters
-from app.models.search import SessionHistoryResponse, SessionMessageResponse
+from app.api.routes.search import _build_assistant_message, _filters_to_dict, _merge_filters
+from app.models.search import LostItemResult, SessionHistoryResponse, SessionMessageResponse
 from app.services.search_session import (
     SessionContext,
     SessionFilters,
@@ -107,3 +107,35 @@ def test_session_history_response_serializes_messages() -> None:
     assert response.session_id == "session-1"
     assert response.messages[0].role == "user"
     assert response.last_filters["filter_category"] == "wallet"
+
+
+def test_build_assistant_message_prefers_agent_reasoning() -> None:
+    message = _build_assistant_message(
+        query="검정 자켓",
+        results=[],
+        agent_reasoning="부산역 보관소에 검정 자켓 후보가 1건 있습니다. 확인해 보세요.",
+    )
+
+    assert message == "부산역 보관소에 검정 자켓 후보가 1건 있습니다. 확인해 보세요."
+
+
+def test_build_assistant_message_builds_plain_response_without_agent_reasoning() -> None:
+    message = _build_assistant_message(
+        query="검정 자켓",
+        results=[
+            LostItemResult(
+                atc_id="1",
+                fd_prdt_nm="검정 자켓",
+                fd_sbjt="검정 자켓 습득",
+                prdt_cl_nm="의류",
+                dep_place="부산역",
+                fd_ymd="2026-03-23",
+                image_url=None,
+                score=0.783,
+                matched_via="text_vec",
+            )
+        ],
+    )
+
+    assert "'검정 자켓'와 관련된 결과 1건을 찾았습니다." in message
+    assert "1. 검정 자켓 / 부산역 / 2026-03-23 / 유사도 0.783" in message
