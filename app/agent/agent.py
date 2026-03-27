@@ -1,4 +1,4 @@
-"""PydanticAI search agent with optional session context."""
+"""PydanticAI search agent with session-aware dependencies."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from app.agent.prompts import LOST_ITEM_SEARCH_PROMPT
 from app.models.search import LostItemResult, SearchMetadata
 from app.services.embedding import EmbeddingService
-from app.services.search_session import SessionFilters, SessionMessage
+from app.services.search_session import SessionContext, SessionFilters
 from app.services.vector_store import VectorStoreService
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SearchDeps:
-    """Shared dependencies and search accumulator for one agent run."""
+    """Dependencies shared during one agent run."""
 
     embedding_service: EmbeddingService
     vector_store: VectorStoreService
@@ -29,7 +29,15 @@ class SearchDeps:
     filter_category: str | None = None
     filter_date_from: str | None = None
     filter_date_to: str | None = None
+    session_id: str | None = None
+    session_context: SessionContext | None = None
     collected_items: dict[str, LostItemResult] = field(default_factory=dict)
+
+    @property
+    def inherited_filters(self) -> SessionFilters:
+        if self.session_context is None:
+            return SessionFilters()
+        return self.session_context.last_filters
 
 
 class AgentResult(BaseModel):
@@ -41,26 +49,23 @@ class AgentResult(BaseModel):
     reasoning: str
 
 
-def build_agent_input(
-    user_query: str,
-    recent_messages: list[SessionMessage] | None = None,
-    summary: str = "",
-    inherited_filters: SessionFilters | None = None,
-) -> str:
-    """Compose the current user request with session context for the agent."""
+def build_agent_input(user_query: str, deps: SearchDeps) -> str:
+    """Compose the agent prompt from current query and dependency-backed session context."""
     sections: list[str] = []
+    session_context = deps.session_context
 
-    if summary.strip():
-        sections.append(f"[세션 요약]\n{summary.strip()}")
+    if session_context and session_context.summary.strip():
+        sections.append(f"[session_summary]\n{session_context.summary.strip()}")
 
-    if recent_messages:
+    if session_context and session_context.recent_messages:
         history_lines = []
-        for message in recent_messages:
-            role_label = "사용자" if message.role == "user" else "어시스턴트"
+        for message in session_context.recent_messages:
+            role_label = "user" if message.role == "user" else "assistant"
             history_lines.append(f"- {role_label}: {message.content}")
-        sections.append("[최근 대화]\n" + "\n".join(history_lines))
+        sections.append("[recent_messages]\n" + "\n".join(history_lines))
 
-    if inherited_filters and any(
+    inherited_filters = deps.inherited_filters
+    if any(
         [
             inherited_filters.filter_category,
             inherited_filters.filter_date_from,
@@ -74,9 +79,9 @@ def build_agent_input(
             filter_lines.append(f"- date_from: {inherited_filters.filter_date_from}")
         if inherited_filters.filter_date_to:
             filter_lines.append(f"- date_to: {inherited_filters.filter_date_to}")
-        sections.append("[유지 중인 검색 필터]\n" + "\n".join(filter_lines))
+        sections.append("[inherited_filters]\n" + "\n".join(filter_lines))
 
-    sections.append(f"[현재 사용자 요청]\n{user_query}")
+    sections.append(f"[current_user_request]\n{user_query}")
     return "\n\n".join(sections)
 
 
@@ -130,7 +135,8 @@ def _build_agent() -> Agent[SearchDeps, str]:
         )
 
         logger.info(
-            "vector_search 호출: query=%r, category=%s -> %d건",
+            "vector_search call: session_id=%s query=%r category=%s -> %d results",
+            deps.session_id,
             query,
             effective_category,
             len(results),
@@ -163,9 +169,8 @@ async def run_search_agent(
     filter_category: str | None = None,
     filter_date_from: str | None = None,
     filter_date_to: str | None = None,
-    session_summary: str = "",
-    recent_messages: list[SessionMessage] | None = None,
-    inherited_filters: SessionFilters | None = None,
+    session_id: str | None = None,
+    session_context: SessionContext | None = None,
 ) -> AgentResult:
     deps = SearchDeps(
         embedding_service=embedding_service,
@@ -174,14 +179,11 @@ async def run_search_agent(
         filter_category=filter_category,
         filter_date_from=filter_date_from,
         filter_date_to=filter_date_to,
+        session_id=session_id,
+        session_context=session_context,
     )
 
-    agent_input = build_agent_input(
-        user_query=user_query,
-        recent_messages=recent_messages,
-        summary=session_summary,
-        inherited_filters=inherited_filters,
-    )
+    agent_input = build_agent_input(user_query, deps)
     result = await _get_agent().run(agent_input, deps=deps)
     reasoning = result.output
 

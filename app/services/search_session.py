@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
-
-logger = logging.getLogger(__name__)
 
 _RECENT_MESSAGE_LIMIT = 6
 _MESSAGE_PREVIEW_LIMIT = 140
@@ -45,7 +42,7 @@ def summarize_messages(
     *,
     max_chars: int = _SUMMARY_MAX_CHARS,
 ) -> str:
-    """Build a compact Korean summary from older conversation turns."""
+    """Build a compact summary from older conversation turns."""
     snippets: list[str] = []
     if existing_summary.strip():
         snippets.append(existing_summary.strip())
@@ -56,7 +53,7 @@ def summarize_messages(
             continue
         if len(content) > _MESSAGE_PREVIEW_LIMIT:
             content = f"{content[:_MESSAGE_PREVIEW_LIMIT - 3]}..."
-        role_label = "사용자" if message.role == "user" else "어시스턴트"
+        role_label = "user" if message.role == "user" else "assistant"
         snippets.append(f"{role_label}: {content}")
 
     merged = " | ".join(snippets)
@@ -95,6 +92,7 @@ class SearchSessionService:
             .to_list(length=_RECENT_MESSAGE_LIMIT)
         )
         recent_docs.reverse()
+
         recent_messages = [
             SessionMessage(
                 role=doc.get("role", "user"),
@@ -122,6 +120,7 @@ class SearchSessionService:
             for message in messages
             if message.content.strip()
         ]
+
         await self._sessions.update_one(
             {"session_id": session_id},
             {
@@ -134,6 +133,7 @@ class SearchSessionService:
             },
             upsert=True,
         )
+
         if docs:
             await self._messages.insert_many(docs)
 

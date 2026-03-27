@@ -135,9 +135,8 @@ async def search_by_text(
                 filter_category=effective_filters.filter_category,
                 filter_date_from=effective_filters.filter_date_from,
                 filter_date_to=effective_filters.filter_date_to,
-                session_summary=session_context.summary if session_context else "",
-                recent_messages=session_context.recent_messages if session_context else None,
-                inherited_filters=session_context.last_filters if session_context else None,
+                session_id=session_id,
+                session_context=session_context,
             )
             results = agent_result.items
             agent_reasoning = agent_result.reasoning
@@ -279,9 +278,8 @@ async def search_combined(
                     embedding_service=embedding,
                     vector_store=vector_store,
                     top_k=top_k,
-                    session_summary=session_context.summary if session_context else "",
-                    recent_messages=session_context.recent_messages if session_context else None,
-                    inherited_filters=session_context.last_filters if session_context else None,
+                    session_id=resolved_session_id,
+                    session_context=session_context,
                 )
                 results = agent_result.items
                 agent_reasoning = agent_result.reasoning
