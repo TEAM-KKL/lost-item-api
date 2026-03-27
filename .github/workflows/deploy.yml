@@ -69,9 +69,7 @@ jobs:
             export PATH="$HOME/.local/bin:$PATH"
             cd "${{ secrets.DEPLOY_PATH }}"
 
-            cat > .env <<'EOF'
-            $ENV_FILE
-            EOF
+            printf '%s\n' "$ENV_FILE" > .env
 
             docker compose up -d mongodb qdrant
 
