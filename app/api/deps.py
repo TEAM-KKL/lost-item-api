@@ -5,6 +5,7 @@ from fastapi import Request
 from app.services.embedding import EmbeddingService
 from app.services.ingest import IngestService
 from app.services.police_client import PoliceAPIClient
+from app.services.search_session import SearchSessionService
 from app.services.vector_store import VectorStoreService
 
 
@@ -22,3 +23,7 @@ def get_police_client(request: Request) -> PoliceAPIClient:
 
 def get_ingest_service(request: Request) -> IngestService:
     return request.app.state.ingest_service
+
+
+def get_search_session_service(request: Request) -> SearchSessionService:
+    return request.app.state.search_session_service

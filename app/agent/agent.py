@@ -1,4 +1,6 @@
-"""PydanticAI 에이전트 - vector_search 툴을 직접 호출하는 방식"""
+"""PydanticAI search agent with optional session context."""
+
+from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
@@ -11,16 +13,15 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from app.agent.prompts import LOST_ITEM_SEARCH_PROMPT
 from app.models.search import LostItemResult, SearchMetadata
 from app.services.embedding import EmbeddingService
+from app.services.search_session import SessionFilters, SessionMessage
 from app.services.vector_store import VectorStoreService
 
 logger = logging.getLogger(__name__)
 
 
-# ──────────────────────────── 의존성 (에이전트에 주입) ────────────────────────────
-
 @dataclass
 class SearchDeps:
-    """에이전트 실행 중 공유되는 의존성 및 결과 누산기"""
+    """Shared dependencies and search accumulator for one agent run."""
 
     embedding_service: EmbeddingService
     vector_store: VectorStoreService
@@ -28,14 +29,11 @@ class SearchDeps:
     filter_category: str | None = None
     filter_date_from: str | None = None
     filter_date_to: str | None = None
-    # 툴 호출마다 누산 (atc_id 기준 중복 제거, 높은 점수 유지)
     collected_items: dict[str, LostItemResult] = field(default_factory=dict)
 
 
-# ──────────────────────────── 에이전트 결과 타입 ────────────────────────────
-
 class AgentResult(BaseModel):
-    """run_search_agent가 반환하는 최종 결과"""
+    """Final agent output returned to the API layer."""
 
     refined_query: str
     metadata: SearchMetadata
@@ -43,16 +41,49 @@ class AgentResult(BaseModel):
     reasoning: str
 
 
-# ──────────────────────────── 에이전트 팩토리 (지연 초기화) ────────────────────────────
+def build_agent_input(
+    user_query: str,
+    recent_messages: list[SessionMessage] | None = None,
+    summary: str = "",
+    inherited_filters: SessionFilters | None = None,
+) -> str:
+    """Compose the current user request with session context for the agent."""
+    sections: list[str] = []
+
+    if summary.strip():
+        sections.append(f"[세션 요약]\n{summary.strip()}")
+
+    if recent_messages:
+        history_lines = []
+        for message in recent_messages:
+            role_label = "사용자" if message.role == "user" else "어시스턴트"
+            history_lines.append(f"- {role_label}: {message.content}")
+        sections.append("[최근 대화]\n" + "\n".join(history_lines))
+
+    if inherited_filters and any(
+        [
+            inherited_filters.filter_category,
+            inherited_filters.filter_date_from,
+            inherited_filters.filter_date_to,
+        ]
+    ):
+        filter_lines = []
+        if inherited_filters.filter_category:
+            filter_lines.append(f"- category: {inherited_filters.filter_category}")
+        if inherited_filters.filter_date_from:
+            filter_lines.append(f"- date_from: {inherited_filters.filter_date_from}")
+        if inherited_filters.filter_date_to:
+            filter_lines.append(f"- date_to: {inherited_filters.filter_date_to}")
+        sections.append("[유지 중인 검색 필터]\n" + "\n".join(filter_lines))
+
+    sections.append(f"[현재 사용자 요청]\n{user_query}")
+    return "\n\n".join(sections)
+
 
 _agent: Agent[SearchDeps, str] | None = None
 
 
 def _get_agent() -> Agent[SearchDeps, str]:
-    """
-    에이전트 싱글톤 반환.
-    첫 호출 시 .env가 이미 로드된 이후이므로 API 키를 안전하게 읽을 수 있음.
-    """
     global _agent
     if _agent is None:
         _agent = _build_agent()
@@ -61,8 +92,8 @@ def _get_agent() -> Agent[SearchDeps, str]:
 
 def _build_agent() -> Agent[SearchDeps, str]:
     from app.config import get_settings
-    settings = get_settings()
 
+    settings = get_settings()
     model = OpenAIModel(
         settings.openai_model,
         provider=OpenAIProvider(api_key=settings.openai_api_key),
@@ -76,8 +107,6 @@ def _build_agent() -> Agent[SearchDeps, str]:
         retries=1,
     )
 
-    # ── 툴 등록 ──────────────────────────────────────────────────────────────
-
     @agent.tool
     async def vector_search(
         ctx: RunContext[SearchDeps],
@@ -86,19 +115,7 @@ def _build_agent() -> Agent[SearchDeps, str]:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> str:
-        """
-        한국 경찰청 습득물 데이터베이스에서 의미론적 유사도 검색을 수행합니다.
-        결과가 부족하거나 유사도가 낮으면 다른 키워드로 여러 번 호출할 수 있습니다.
-
-        Args:
-            query: 검색 키워드 (한국어, 5단어 이내). 물품명+색상+재질 조합. 장소·날짜 제외.
-                   예: '검정 가죽 지갑', '흰색 에어팟 케이스', '삼성 갤럭시 S24'
-            category: 물품 분류 필터 (선택). 예: '지갑', '핸드폰', '가방'
-            date_from: 습득일 시작 필터 (YYYY-MM-DD, 선택)
-            date_to: 습득일 종료 필터 (YYYY-MM-DD, 선택)
-        """
         deps = ctx.deps
-
         effective_category = deps.filter_category or category
         effective_date_from = deps.filter_date_from or date_from
         effective_date_to = deps.filter_date_to or date_to
@@ -113,8 +130,10 @@ def _build_agent() -> Agent[SearchDeps, str]:
         )
 
         logger.info(
-            "vector_search 호출: query=%r, category=%s → %d건",
-            query, effective_category, len(results),
+            "vector_search 호출: query=%r, category=%s -> %d건",
+            query,
+            effective_category,
+            len(results),
         )
 
         for item in results:
@@ -125,19 +144,16 @@ def _build_agent() -> Agent[SearchDeps, str]:
             return "검색 결과 없음"
 
         lines = [f"검색 결과 총 {len(results)}건:"]
-        for i, r in enumerate(results[:5]):
+        for index, result in enumerate(results[:5], start=1):
             lines.append(
-                f"[{i+1}] {r.fd_prdt_nm} | {r.prdt_cl_nm} | {r.dep_place} | {r.fd_ymd} | 유사도 {r.score:.3f}"
+                f"[{index}] {result.fd_prdt_nm} | {result.prdt_cl_nm} | {result.dep_place} | {result.fd_ymd} | 유사도 {result.score:.3f}"
             )
         if len(results) > 5:
             lines.append(f"... 외 {len(results) - 5}건")
-
         return "\n".join(lines)
 
     return agent
 
-
-# ──────────────────────────── 에이전트 실행 헬퍼 ────────────────────────────
 
 async def run_search_agent(
     user_query: str,
@@ -147,6 +163,9 @@ async def run_search_agent(
     filter_category: str | None = None,
     filter_date_from: str | None = None,
     filter_date_to: str | None = None,
+    session_summary: str = "",
+    recent_messages: list[SessionMessage] | None = None,
+    inherited_filters: SessionFilters | None = None,
 ) -> AgentResult:
     deps = SearchDeps(
         embedding_service=embedding_service,
@@ -157,15 +176,21 @@ async def run_search_agent(
         filter_date_to=filter_date_to,
     )
 
-    result = await _get_agent().run(user_query, deps=deps)
-    reasoning: str = result.output
+    agent_input = build_agent_input(
+        user_query=user_query,
+        recent_messages=recent_messages,
+        summary=session_summary,
+        inherited_filters=inherited_filters,
+    )
+    result = await _get_agent().run(agent_input, deps=deps)
+    reasoning = result.output
 
-    items = sorted(deps.collected_items.values(), key=lambda x: x.score, reverse=True)[:top_k]
+    items = sorted(deps.collected_items.values(), key=lambda item: item.score, reverse=True)[:top_k]
 
     last_query = user_query
     last_category: str | None = filter_category
-    for msg in result.all_messages():
-        for part in getattr(msg, "parts", []):
+    for message in result.all_messages():
+        for part in getattr(message, "parts", []):
             if getattr(part, "tool_name", None) == "vector_search":
                 args = getattr(part, "args", {})
                 if isinstance(args, dict):
