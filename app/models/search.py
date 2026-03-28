@@ -43,6 +43,7 @@ class LostItemResult(BaseModel):
     dep_place: str = Field(description="보관 장소")
     fd_ymd: str = Field(description="습득일자")
     image_url: str | None = Field(default=None, description="습득물 사진 URL")
+    pkup_plc_se_nm: str | None = Field(default=None, description="습득장소 구분명")
     score: float = Field(description="유사도 점수")
     matched_via: str = Field(description="매칭 경로")
 

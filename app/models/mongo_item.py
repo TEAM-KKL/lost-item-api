@@ -23,6 +23,7 @@ class MongoLostItem(BaseModel):
     pkup_cmdty_lclsf_nm: str = Field(alias="PKUP_CMDTY_LCLSF_NM", default="", description="대분류명")
     pkup_cmdty_mclsf_nm: str = Field(alias="PKUP_CMDTY_MCLSF_NM", default="", description="중분류명")
     sgg_nm: str = Field(alias="SGG_NM", default="", description="시군구명")
+    pkup_plc_se_nm: str = Field(alias="PKUP_PLC_SE_NM", default="", description="습득장소 구분명")
     strg_file_path: str = Field(alias="STRG_FILE_PATH", default="", description="이미지 파일 경로 코드")
     image_path: str = Field(default="", description="로컬 이미지 절대경로")
     search_text: str = Field(default="", description="검색용 텍스트 (크롤러가 생성)")
@@ -58,5 +59,5 @@ class MongoLostItem(BaseModel):
         """CLIP text_vec 생성에 사용할 텍스트. search_text가 있으면 우선 사용."""
         if self.search_text:
             return self.search_text
-        parts = [self.item_cn, self.pstg_ttl, self.category, self.sgg_nm]
+        parts = [self.item_cn, self.pstg_ttl, self.category, self.sgg_nm, self.pkup_plc_se_nm]
         return " ".join(p for p in parts if p and p.strip())

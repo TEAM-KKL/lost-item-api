@@ -173,6 +173,7 @@ class VectorStoreService:
                         "fd_file_path_img": item.image_path or None,
                         "has_image": image_vec is not None,
                         "sgg_nm": item.sgg_nm,
+                        "pkup_plc_se_nm": item.pkup_plc_se_nm or None,
                         "source": "mongodb",
                     },
                 )
@@ -225,6 +226,7 @@ class VectorStoreService:
                     dep_place=p.get("dep_place", ""),
                     fd_ymd=p.get("fd_ymd", ""),
                     image_url=p.get("fd_file_path_img"),
+                    pkup_plc_se_nm=p.get("pkup_plc_se_nm"),
                     score=round(hit.score, 6),
                     matched_via=via,
                 )
@@ -343,6 +345,7 @@ class VectorStoreService:
                     dep_place=p.get("dep_place", ""),
                     fd_ymd=p.get("fd_ymd", ""),
                     image_url=p.get("fd_file_path_img"),
+                    pkup_plc_se_nm=p.get("pkup_plc_se_nm"),
                     score=round(score, 6),
                     matched_via=matched_via.get(pid, "unknown"),
                 )
@@ -420,6 +423,7 @@ class VectorStoreService:
                     dep_place=p.get("dep_place", ""),
                     fd_ymd=p.get("fd_ymd", ""),
                     image_url=p.get("fd_file_path_img"),
+                    pkup_plc_se_nm=p.get("pkup_plc_se_nm"),
                     score=1.0,
                     matched_via="recent",
                 )
