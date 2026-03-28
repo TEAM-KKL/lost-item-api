@@ -78,6 +78,15 @@ class SessionMessageResponse(BaseModel):
     created_at: str | None = Field(default=None, description="메시지 생성 시각 (ISO 8601)")
 
 
+class RecentItemsResponse(BaseModel):
+    """최근 등록된 분실물 목록 응답."""
+
+    items: list[LostItemResult] = Field(description="분실물 목록")
+    total: int = Field(description="반환된 결과 수")
+    has_next: bool = Field(description="다음 페이지 존재 여부")
+    search_time_ms: float = Field(description="조회 소요 시간 (밀리초)")
+
+
 class SessionHistoryResponse(BaseModel):
     """Session conversation history response."""
 

@@ -349,6 +349,73 @@ class VectorStoreService:
             )
         return results
 
+    # ──────────────────────────── 최근 목록 ────────────────────────────
+
+    async def get_recent_items(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        filter_category: str | None = None,
+        filter_date_from: str | None = None,
+        filter_date_to: str | None = None,
+    ) -> tuple[list[LostItemResult], bool]:
+        """
+        최근 등록된 분실물 목록 반환 (fd_ymd 내림차순).
+
+        날짜 필터를 지정하지 않으면 최근 30일 데이터만 조회합니다.
+        최대 1000건을 fetch한 뒤 Python에서 정렬 후 페이지네이션을 적용합니다.
+        """
+        from datetime import date, timedelta
+
+        if not filter_date_from and not filter_date_to:
+            filter_date_from = (date.today() - timedelta(days=30)).isoformat()
+
+        qdrant_filter = self._build_filter(filter_category, filter_date_from, filter_date_to)
+
+        _MAX_FETCH = 1000
+        all_points: list = []
+        current_offset = None
+
+        while len(all_points) < _MAX_FETCH:
+            batch, current_offset = await self._client.scroll(
+                collection_name=self.COLLECTION,
+                scroll_filter=qdrant_filter,
+                limit=min(256, _MAX_FETCH - len(all_points)),
+                offset=current_offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            all_points.extend(batch)
+            if current_offset is None:
+                break
+
+        all_points.sort(
+            key=lambda p: (p.payload or {}).get("fd_ymd", ""),
+            reverse=True,
+        )
+
+        page = all_points[offset: offset + limit]
+        has_next = len(all_points) > offset + limit
+
+        items = []
+        for hit in page:
+            p = hit.payload or {}
+            items.append(
+                LostItemResult(
+                    atc_id=p.get("atc_id", ""),
+                    fd_prdt_nm=p.get("fd_prdt_nm", ""),
+                    fd_sbjt=p.get("fd_sbjt", ""),
+                    prdt_cl_nm=p.get("prdt_cl_nm", ""),
+                    dep_place=p.get("dep_place", ""),
+                    fd_ymd=p.get("fd_ymd", ""),
+                    image_url=p.get("fd_file_path_img"),
+                    score=1.0,
+                    matched_via="recent",
+                )
+            )
+
+        return items, has_next
+
     # ──────────────────────────── 통계 ────────────────────────────
 
     async def get_collection_info(self) -> dict:

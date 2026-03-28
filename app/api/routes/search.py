@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.agent.agent import run_search_agent
 from app.api.deps import (
@@ -15,6 +15,7 @@ from app.api.deps import (
 )
 from app.models.search import (
     LostItemResult,
+    RecentItemsResponse,
     SearchResponse,
     SessionHistoryResponse,
     SessionMessageResponse,
@@ -117,6 +118,37 @@ async def _persist_session_turn(
         await session_service.update_session_summary(session_id, existing_summary, filters)
     except Exception as exc:
         logger.warning("세션 저장 실패, 검색 결과만 반환: %s", exc)
+
+
+@router.get("/recent", response_model=RecentItemsResponse, summary="최근 등록된 분실물 목록 조회")
+async def get_recent_items(
+    limit: int = Query(default=20, ge=1, le=100, description="반환할 결과 수"),
+    offset: int = Query(default=0, ge=0, description="건너뛸 결과 수 (페이지네이션)"),
+    filter_category: str | None = Query(default=None, description="물품분류명 필터"),
+    filter_date_from: str | None = Query(default=None, description="습득일 시작 (YYYY-MM-DD)"),
+    filter_date_to: str | None = Query(default=None, description="습득일 종료 (YYYY-MM-DD)"),
+    vector_store: VectorStoreService = Depends(get_vector_store),
+) -> RecentItemsResponse:
+    start = time.perf_counter()
+    try:
+        items, has_next = await vector_store.get_recent_items(
+            limit=limit,
+            offset=offset,
+            filter_category=filter_category,
+            filter_date_from=filter_date_from,
+            filter_date_to=filter_date_to,
+        )
+    except Exception as exc:
+        logger.error("최근 분실물 조회 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="최근 분실물 조회에 실패했습니다.") from exc
+
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    return RecentItemsResponse(
+        items=items,
+        total=len(items),
+        has_next=has_next,
+        search_time_ms=round(elapsed_ms, 2),
+    )
 
 
 @router.get(
