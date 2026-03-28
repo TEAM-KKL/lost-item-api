@@ -142,6 +142,9 @@ def build_agent_input(user_query: str, deps: SearchDeps) -> str:
             filter_lines.append(f"- date_to: {inherited_filters.filter_date_to}")
         sections.append("[inherited_filters]\n" + "\n".join(filter_lines))
 
+    if deps.image_vec is not None:
+        sections.append("[available_tools]\nimage_search 툴을 사용할 수 있습니다. 지금 바로 image_search 툴을 호출하세요.")
+
     sections.append(f"[current_user_request]\n{user_query}")
     return "\n\n".join(sections)
 
