@@ -31,6 +31,7 @@ class SearchDeps:
     filter_date_to: str | None = None
     session_id: str | None = None
     session_context: SessionContext | None = None
+    image_vec: list[float] | None = None
     collected_items: dict[str, LostItemResult] = field(default_factory=dict)
 
     @property
@@ -220,6 +221,43 @@ def _build_agent() -> Agent[SearchDeps, str]:
             lines.append(f"... 외 {len(results) - 5}건")
         return "\n".join(lines)
 
+    @agent.tool
+    async def image_search(
+        ctx: RunContext[SearchDeps],
+        top_k: int | None = None,
+    ) -> str:
+        deps = ctx.deps
+        if deps.image_vec is None:
+            return "이미지 벡터가 없습니다. image_search 툴은 이미지가 제공된 경우에만 사용할 수 있습니다."
+
+        effective_top_k = min(top_k if top_k is not None else deps.top_k, 50)
+        results = await deps.vector_store.search_by_image(
+            image_vec=deps.image_vec,
+            top_k=effective_top_k,
+        )
+
+        logger.info(
+            "image_search call: session_id=%s -> %d results",
+            deps.session_id,
+            len(results),
+        )
+
+        for item in results:
+            if item.atc_id not in deps.collected_items or item.score > deps.collected_items[item.atc_id].score:
+                deps.collected_items[item.atc_id] = item
+
+        if not results:
+            return "이미지 검색 결과 없음"
+
+        lines = [f"이미지 검색 결과 총 {len(results)}건:"]
+        for index, result in enumerate(results[:5], start=1):
+            lines.append(
+                f"[{index}] {result.fd_prdt_nm} | {result.prdt_cl_nm} | {result.dep_place} | {result.fd_ymd} | 유사도 {result.score:.3f}"
+            )
+        if len(results) > 5:
+            lines.append(f"... 외 {len(results) - 5}건")
+        return "\n".join(lines)
+
     return agent
 
 
@@ -233,6 +271,7 @@ async def run_search_agent(
     filter_date_to: str | None = None,
     session_id: str | None = None,
     session_context: SessionContext | None = None,
+    image_vec: list[float] | None = None,
 ) -> AgentResult:
     deps = SearchDeps(
         embedding_service=embedding_service,
@@ -243,6 +282,7 @@ async def run_search_agent(
         filter_date_to=filter_date_to,
         session_id=session_id,
         session_context=session_context,
+        image_vec=image_vec,
     )
 
     agent_input = build_agent_input(user_query, deps)

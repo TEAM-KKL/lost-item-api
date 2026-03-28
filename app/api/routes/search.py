@@ -245,8 +245,11 @@ async def search_by_text(
 async def search_by_image(
     file: UploadFile = File(..., description="검색할 이미지 파일"),
     top_k: int = Form(default=10, ge=1, le=50),
+    use_agent: bool = Form(default=True),
+    session_id: str | None = Form(default=None),
     embedding: EmbeddingService = Depends(get_embedding_service),
     vector_store: VectorStoreService = Depends(get_vector_store),
+    session_service: SearchSessionService = Depends(get_search_session_service),
 ) -> SearchResponse:
     start = time.perf_counter()
 
@@ -262,17 +265,49 @@ async def search_by_image(
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"이미지 처리 실패: {exc}") from exc
 
-    results = await vector_store.search_by_image(image_vec=image_vec, top_k=top_k)
+    agent_reasoning: str | None = None
+    resolved_session_id = _resolve_session_id(session_service, session_id, enable_session=use_agent)
+    session_context = await _load_session_context(session_service, resolved_session_id)
+
+    if use_agent:
+        try:
+            agent_result = await run_search_agent(
+                user_query="이미지로 유사한 분실물을 찾아주세요.",
+                embedding_service=embedding,
+                vector_store=vector_store,
+                top_k=top_k,
+                session_id=resolved_session_id,
+                session_context=session_context,
+                image_vec=image_vec,
+            )
+            results = agent_result.items
+            agent_reasoning = agent_result.reasoning
+        except Exception as exc:
+            logger.warning("에이전트 실행 실패, 원시 검색으로 폴백: %s", exc)
+            results = await vector_store.search_by_image(image_vec=image_vec, top_k=top_k)
+    else:
+        results = await vector_store.search_by_image(image_vec=image_vec, top_k=top_k)
+
     assistant_message = _build_assistant_message(
         query="이미지 검색",
         results=results,
+        agent_reasoning=agent_reasoning,
+    )
+    await _persist_session_turn(
+        session_service,
+        resolved_session_id,
+        user_query="이미지로 유사한 분실물을 찾아주세요.",
+        assistant_message=assistant_message,
+        filters=session_context.last_filters if session_context else SessionFilters(),
+        existing_summary=session_context.summary if session_context else "",
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
     return SearchResponse(
         items=results,
         total=len(results),
-        session_id=None,
+        session_id=resolved_session_id,
         assistant_message=assistant_message,
+        agent_reasoning=agent_reasoning,
         search_time_ms=round(elapsed_ms, 2),
     )
 
@@ -318,34 +353,37 @@ async def search_combined(
             except Exception as exc:
                 logger.warning("이미지 처리 실패, 텍스트 검색으로 계속 진행: %s", exc)
 
-    if text_vec is not None and image_vec is not None:
-        results = await vector_store.search_combined(
-            text_vec=text_vec,
-            image_vec=image_vec,
-            top_k=top_k,
-        )
+    if use_agent and (text_vec is not None or image_vec is not None):
+        agent_query = query if query else "이미지로 유사한 분실물을 찾아주세요."
+        try:
+            agent_result = await run_search_agent(
+                user_query=agent_query,
+                embedding_service=embedding,
+                vector_store=vector_store,
+                top_k=top_k,
+                session_id=resolved_session_id,
+                session_context=session_context,
+                image_vec=image_vec,
+            )
+            results = agent_result.items
+            agent_reasoning = agent_result.reasoning
+            query_metadata = agent_result.metadata
+        except Exception as exc:
+            logger.warning("에이전트 실행 실패, 원시 검색으로 폴백: %s", exc)
+            if text_vec is not None and image_vec is not None:
+                results = await vector_store.search_combined(text_vec=text_vec, image_vec=image_vec, top_k=top_k)
+            elif image_vec is not None:
+                results = await vector_store.search_by_image(image_vec=image_vec, top_k=top_k)
+            else:
+                assert text_vec is not None
+                results = await vector_store.search_by_text(text_vec, top_k=top_k)
+    elif text_vec is not None and image_vec is not None:
+        results = await vector_store.search_combined(text_vec=text_vec, image_vec=image_vec, top_k=top_k)
     elif image_vec is not None:
         results = await vector_store.search_by_image(image_vec=image_vec, top_k=top_k)
     else:
-        assert query is not None
-        if use_agent:
-            try:
-                agent_result = await run_search_agent(
-                    user_query=query,
-                    embedding_service=embedding,
-                    vector_store=vector_store,
-                    top_k=top_k,
-                    session_id=resolved_session_id,
-                    session_context=session_context,
-                )
-                results = agent_result.items
-                agent_reasoning = agent_result.reasoning
-                query_metadata = agent_result.metadata
-            except Exception as exc:
-                logger.warning("에이전트 실행 실패, 원시 검색으로 폴백: %s", exc)
-                results = await vector_store.search_by_text(text_vec, top_k=top_k)
-        else:
-            results = await vector_store.search_by_text(text_vec, top_k=top_k)
+        assert text_vec is not None
+        results = await vector_store.search_by_text(text_vec, top_k=top_k)
 
     assistant_message = _build_assistant_message(
         query=query or "복합 검색",
