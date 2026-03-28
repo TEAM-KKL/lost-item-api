@@ -68,10 +68,3 @@ jobs:
             fi
 
             uv sync --no-dev
-
-            pkill -f "uvicorn app.main:app" || true
-            sleep 3
-            setsid nohup .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 < /dev/null &
-
-            sleep 5
-            curl -sf http://localhost:8000/health || { echo "=== 서버 기동 실패 ==="; cat uvicorn.log; exit 1; }
