@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from qdrant_client import AsyncQdrantClient
 
-from app.api.routes import health, ingest, mongo_ingest, search
+from app.api.routes import health, images, ingest, mongo_ingest, search
 from app.config import get_settings
 from app.services.embedding import EmbeddingService
 from app.services.ingest import IngestService
@@ -122,6 +122,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(images.router)
     app.include_router(ingest.router, prefix="/api/v1")
     app.include_router(mongo_ingest.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
