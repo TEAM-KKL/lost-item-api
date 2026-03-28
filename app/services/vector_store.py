@@ -370,7 +370,8 @@ class VectorStoreService:
         if not filter_date_from and not filter_date_to:
             filter_date_from = (date.today() - timedelta(days=30)).isoformat()
 
-        qdrant_filter = self._build_filter(filter_category, filter_date_from, filter_date_to)
+        # fd_ymd는 KEYWORD 인덱스라 Qdrant Range 필터 불가 → 카테고리만 Qdrant에 위임
+        qdrant_filter = self._build_filter(filter_category)
 
         _MAX_FETCH = 1000
         all_points: list = []
@@ -389,6 +390,16 @@ class VectorStoreService:
             if current_offset is None:
                 break
 
+        # 날짜 필터링 및 정렬은 Python에서 처리
+        def _in_range(point: object) -> bool:
+            fd_ymd = (getattr(point, "payload", None) or {}).get("fd_ymd", "")
+            if filter_date_from and fd_ymd < filter_date_from:
+                return False
+            if filter_date_to and fd_ymd > filter_date_to:
+                return False
+            return True
+
+        all_points = [p for p in all_points if _in_range(p)]
         all_points.sort(
             key=lambda p: (p.payload or {}).get("fd_ymd", ""),
             reverse=True,
