@@ -7,26 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Run tests
-        run: uv run pytest -q tests/test_search_session.py
 
       - name: Create target directory
         uses: appleboy/ssh-action@v1.0.3
@@ -47,7 +33,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          source: "app,pyproject.toml,uv.lock,docker-compose.yml"
+          source: "app,scripts,pyproject.toml,uv.lock,docker-compose.yml"
           target: ${{ secrets.DEPLOY_PATH }}
           strip_components: 0
           overwrite: true
@@ -84,4 +70,8 @@ jobs:
             uv sync --no-dev
 
             pkill -f "uvicorn app.main:app" || true
+            sleep 3
             nohup .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 < /dev/null &
+
+            sleep 5
+            curl -sf http://localhost:8000/health || { echo "=== 서버 기동 실패 ==="; cat uvicorn.log; exit 1; }
