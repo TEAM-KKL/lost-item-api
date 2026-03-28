@@ -10,7 +10,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from app.agent.prompts import LOST_ITEM_SEARCH_PROMPT
+from app.agent.prompts import LOST_ITEM_SEARCH_PROMPT, RERANK_PROMPT
 from app.models.search import LostItemResult, SearchMetadata
 from app.services.embedding import EmbeddingService
 from app.services.search_session import SessionContext, SessionFilters
@@ -47,6 +47,66 @@ class AgentResult(BaseModel):
     metadata: SearchMetadata
     items: list[LostItemResult]
     reasoning: str
+
+
+class _RerankItem(BaseModel):
+    atc_id: str
+    relevant: bool
+
+
+class _RerankResponse(BaseModel):
+    items: list[_RerankItem]
+
+
+_rerank_agent: Agent[None, _RerankResponse] | None = None
+
+
+def _get_rerank_agent() -> Agent[None, _RerankResponse]:
+    global _rerank_agent
+    if _rerank_agent is None:
+        from app.config import get_settings
+
+        settings = get_settings()
+        model = OpenAIModel(
+            settings.openai_model,
+            provider=OpenAIProvider(api_key=settings.openai_api_key),
+        )
+        _rerank_agent = Agent(
+            model=model,
+            deps_type=None,
+            output_type=_RerankResponse,
+            system_prompt=RERANK_PROMPT,
+            retries=1,
+        )
+    return _rerank_agent
+
+
+async def rerank_items(user_query: str, items: list[LostItemResult]) -> list[LostItemResult]:
+    """LLM으로 후보 결과를 사용자 쿼리와 비교해 관련 없는 항목을 제거합니다."""
+    if not items:
+        return items
+
+    lines = [f"[사용자 분실물 설명]\n{user_query}\n\n[후보 물품 목록]"]
+    for item in items:
+        lines.append(
+            f"- atc_id: {item.atc_id} | 물품명: {item.fd_prdt_nm} | 분류: {item.prdt_cl_nm} | 유사도: {item.score:.3f}"
+        )
+    prompt = "\n".join(lines)
+
+    try:
+        result = await _get_rerank_agent().run(prompt)
+        relevant_ids = {r.atc_id for r in result.output.items if r.relevant}
+        filtered = [item for item in items if item.atc_id in relevant_ids]
+        logger.info(
+            "rerank: %d → %d items (query=%r)",
+            len(items),
+            len(filtered),
+            user_query,
+        )
+        return filtered if filtered else items
+    except Exception as exc:
+        logger.warning("rerank 실패, 원본 결과 반환: %s", exc)
+        return items
 
 
 def build_agent_input(user_query: str, deps: SearchDeps) -> str:
@@ -188,6 +248,7 @@ async def run_search_agent(
     reasoning = result.output
 
     items = sorted(deps.collected_items.values(), key=lambda item: item.score, reverse=True)[:top_k]
+    items = await rerank_items(user_query, items)
 
     last_query = user_query
     last_category: str | None = filter_category
