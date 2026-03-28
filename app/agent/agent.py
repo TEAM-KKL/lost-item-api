@@ -176,11 +176,13 @@ def _build_agent() -> Agent[SearchDeps, str]:
     async def vector_search(
         ctx: RunContext[SearchDeps],
         query: str,
+        top_k: int | None = None,
         category: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> str:
         deps = ctx.deps
+        effective_top_k = min(top_k if top_k is not None else deps.top_k, 50)
         effective_category = deps.filter_category or category
         effective_date_from = deps.filter_date_from or date_from
         effective_date_to = deps.filter_date_to or date_to
@@ -188,7 +190,7 @@ def _build_agent() -> Agent[SearchDeps, str]:
         query_vec = await deps.embedding_service.encode_text(query)
         results = await deps.vector_store.search_by_text(
             query_vec=query_vec,
-            top_k=deps.top_k * 2,
+            top_k=effective_top_k,
             filter_category=effective_category,
             filter_date_from=effective_date_from,
             filter_date_to=effective_date_to,
